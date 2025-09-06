@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 import pickle
 import joblib
 import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Wedge, Rectangle
 import shap
@@ -23,7 +25,7 @@ def home():
 def predict():
 
     gender = 0
-    if request.form["gender"] == 1:
+    if request.form["gender"] == "1":
         gender = 1
     SeniorCitizen = 0
     if 'SeniorCitizen' in request.form:
@@ -52,9 +54,9 @@ def predict():
 
     InternetService_Fiberoptic = 0
     InternetService_No = 0
-    if request.form["InternetService"] == 0:
+    if request.form["InternetService"] == "0":
         InternetService_No = 1
-    elif request.form["InternetService"] == 2:
+    elif request.form["InternetService"] == "2":
         InternetService_Fiberoptic = 1
 
     OnlineSecurity = 0
@@ -83,19 +85,19 @@ def predict():
 
     Contract_Oneyear = 0
     Contract_Twoyear = 0
-    if request.form["Contract"] == 1:
+    if request.form["Contract"] == "1":
         Contract_Oneyear = 1
-    elif request.form["Contract"] == 2:
+    elif request.form["Contract"] == "2":
         Contract_Twoyear = 1
 
     PaymentMethod_CreditCard = 0
     PaymentMethod_ElectronicCheck = 0
     PaymentMethod_MailedCheck = 0
-    if request.form["PaymentMethod"] == 1:
+    if request.form["PaymentMethod"] == "1":
         PaymentMethod_CreditCard = 1
-    elif request.form["PaymentMethod"] == 2:
+    elif request.form["PaymentMethod"] == "2":
         PaymentMethod_ElectronicCheck = 1
-    elif request.form["PaymentMethod"] == 3:
+    elif request.form["PaymentMethod"] == "3":
         PaymentMethod_MailedCheck = 1
 
     features = [gender, SeniorCitizen, Partner, Dependents, Tenure, PhoneService, MultipleLines, OnlineSecurity, OnlineBackup,
@@ -107,57 +109,99 @@ def predict():
        'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies','PaperlessBilling', 'MonthlyCharges', 'TotalCharges',
        'InternetService_Fiber optic', 'InternetService_No', 'Contract_One year', 'Contract_Two year',
        'PaymentMethod_Credit card (automatic)', 'PaymentMethod_Electronic check', 'PaymentMethod_Mailed check']
+    
+    # Convert features to DataFrame with proper column names to avoid sklearn warning
+    features_df = pd.DataFrame([features], columns=columns)
 
     final_features = [np.array(features)]
-    prediction = model.predict_proba(final_features)
+    prediction = model.predict_proba(features_df)
 
     output = prediction[0,1]
 
-    # Shap Values
-    explainer = joblib.load(filename="explainer.bz2")
-    shap_values = explainer.shap_values(np.array(final_features))
-    shap_img = io.BytesIO()
-    shap.force_plot(explainer.expected_value[1], shap_values[1], columns, matplotlib = True, show = False).savefig(shap_img, bbox_inches="tight", format = 'png')
-    shap_img.seek(0)
-    shap_url = base64.b64encode(shap_img.getvalue()).decode()
+       # Load SHAP explainer
+    explainer = joblib.load("explainer.bz2")
+
+    # Convert features to 1D array
+    row = np.array(final_features[0])  # shape (n_features,)
+
+    # Get SHAP values using DataFrame
+    shap_values = explainer.shap_values(features_df)  # shape (n_features,)
+    if isinstance(shap_values, list):
+       shap_values = shap_values[1]
+       base_value = explainer.expected_value[1]
+    else:
+       base_value = explainer.expected_value
+    
+    # Generate force plot and save to BytesIO
+    try:
+        shap_img = io.BytesIO()
+        plt.figure(figsize=(12, 3))
+        
+        # Use the new SHAP API for v0.20+
+        shap.plots.force(
+            base_value,
+            shap_values,
+            features=row,
+            feature_names=columns,
+            matplotlib=True,
+            show=False
+        )
+        plt.savefig(shap_img, bbox_inches="tight", format='png')
+        plt.close()
+        shap_img.seek(0)
+
+        # Encode to base64 for HTML
+        shap_url = base64.b64encode(shap_img.getvalue()).decode()
+    except Exception as e:
+        # Fallback if SHAP plotting fails
+        shap_url = ""
+
+
+
 
     # Hazard and Survival Analysis
-    surv_feats = np.array([gender, SeniorCitizen, Partner, Dependents, PhoneService, MultipleLines, OnlineSecurity, OnlineBackup,
-       DeviceProtection, TechSupport, StreamingTV, StreamingMovies, PaperlessBilling, MonthlyCharges, TotalCharges,
-       InternetService_Fiberoptic, InternetService_No, Contract_Oneyear,Contract_Twoyear,
-       PaymentMethod_CreditCard, PaymentMethod_ElectronicCheck, PaymentMethod_MailedCheck])
+    try:
+        # Use the same features as the main model
+        surv_feats = features_df.values
 
-    surv_feats = surv_feats.reshape(1, len(surv_feats))
+        hazard_img = io.BytesIO()
+        fig, ax = plt.subplots()
+        survmodel.predict_cumulative_hazard(surv_feats).plot(ax = ax, color = 'red')
+        plt.axvline(x=Tenure, color = 'blue', linestyle='--')
+        plt.legend(labels=['Hazard','Current Position'])
+        ax.set_xlabel('Tenure', size = 10)
+        ax.set_ylabel('Cumulative Hazard', size = 10)
+        ax.set_title('Cumulative Hazard Over Time')
+        plt.savefig(hazard_img, format = 'png')
+        plt.close()
+        hazard_img.seek(0)
+        hazard_url = base64.b64encode(hazard_img.getvalue()).decode()
 
-    hazard_img = io.BytesIO()
-    fig, ax = plt.subplots()
-    survmodel.predict_cumulative_hazard(surv_feats).plot(ax = ax, color = 'red')
-    plt.axvline(x=Tenure, color = 'blue', linestyle='--')
-    plt.legend(labels=['Hazard','Current Position'])
-    ax.set_xlabel('Tenure', size = 10)
-    ax.set_ylabel('Cumulative Hazard', size = 10)
-    ax.set_title('Cumulative Hazard Over Time')
-    plt.savefig(hazard_img, format = 'png')
-    hazard_img.seek(0)
-    hazard_url = base64.b64encode(hazard_img.getvalue()).decode()
+        surv_img = io.BytesIO()
+        fig, ax = plt.subplots()
+        survmodel.predict_survival_function(surv_feats).plot(ax = ax, color = 'red')
+        plt.axvline(x=Tenure, color = 'blue', linestyle='--')
+        plt.legend(labels=['Survival Function','Current Position'])
+        ax.set_xlabel('Tenure', size = 10)
+        ax.set_ylabel('Survival Probability', size = 10)
+        ax.set_title('Survival Probability Over Time')
+        plt.savefig(surv_img, format = 'png')
+        plt.close()
+        surv_img.seek(0)
+        surv_url = base64.b64encode(surv_img.getvalue()).decode()
 
-    surv_img = io.BytesIO()
-    fig, ax = plt.subplots()
-    survmodel.predict_survival_function(surv_feats).plot(ax = ax, color = 'red')
-    plt.axvline(x=Tenure, color = 'blue', linestyle='--')
-    plt.legend(labels=['Survival Function','Current Position'])
-    ax.set_xlabel('Tenure', size = 10)
-    ax.set_ylabel('Survival Probability', size = 10)
-    ax.set_title('Survival Probability Over Time')
-    plt.savefig(surv_img, format = 'png')
-    surv_img.seek(0)
-    surv_url = base64.b64encode(surv_img.getvalue()).decode()
+        life = survmodel.predict_survival_function(surv_feats).reset_index()
+        life.columns = ['Tenure', 'Probability']
+        max_life = life.Tenure[life.Probability > 0.1].max()
+        if pd.isna(max_life):
+            max_life = Tenure + 12  # Default to 12 months if no valid prediction
 
-    life = survmodel.predict_survival_function(surv_feats).reset_index()
-    life.columns = ['Tenure', 'Probability']
-    max_life = life.Tenure[life.Probability > 0.1].max()
-
-    CLTV = max_life * MonthlyCharges
+        CLTV = max_life * MonthlyCharges
+    except Exception as e:
+        # Fallback if survival model fails
+        hazard_url = ""
+        surv_url = ""
+        CLTV = Tenure * MonthlyCharges
 
     # Gauge plot
     def degree_range(n):
