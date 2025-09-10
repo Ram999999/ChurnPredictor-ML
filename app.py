@@ -3,8 +3,6 @@ import pandas as pd
 import pickle
 import joblib
 import matplotlib
-import os
-from dotenv import load_dotenv
 matplotlib.use('Agg')  # Use non-GUI backend
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Wedge, Rectangle
@@ -15,14 +13,9 @@ from flask import Flask, request, jsonify, render_template
 import base64
 import io
 
-load_dotenv()
-
 app = Flask(__name__)
-MODEL_PATH = os.environ.get('MODEL_PATH', 'model.pkl')
-SURVIVAL_MODEL_PATH = os.environ.get('SURVIVAL_MODEL_PATH', 'survivemodel.pkl')
-EXPLAINER_PATH = os.environ.get('EXPLAINER_PATH', 'explainer.bz2')
-model = pickle.load(open(MODEL_PATH, 'rb'))
-survmodel = pickle.load(open(SURVIVAL_MODEL_PATH, 'rb'))
+model = pickle.load(open('model.pkl', 'rb'))
+survmodel = pickle.load(open('survivemodel.pkl', 'rb'))
 
 @app.route('/')
 def home():
@@ -126,7 +119,7 @@ def predict():
     output = prediction[0,1]
 
        # Load SHAP explainer
-    explainer = joblib.load(EXPLAINER_PATH)
+    explainer = joblib.load("explainer.bz2")
 
     # Convert features to 1D array
     row = np.array(final_features[0])  # shape (n_features,)
@@ -304,7 +297,4 @@ def predict():
 
 
 if __name__ == "__main__":
-    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
-    port = int(os.environ.get('PORT', '5000'))
-    host = os.environ.get('HOST', '0.0.0.0')
-    app.run(debug=debug, host=host, port=port)
+    app.run(debug=True)
