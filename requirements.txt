@@ -18,3 +18,4 @@ lifelines==0.27.8
 scipy==1.11.1
 statsmodels==0.14.0
 IPython==8.14.0
+python-dotenv==1.0.1
